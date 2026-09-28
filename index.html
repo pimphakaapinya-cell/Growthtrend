@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Power Distribution Analytics Dashboard</title>
+
+    <!-- Google Fonts: Prompt สำหรับ Dashboard ด้านนอก -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome สำหรับไอคอน -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Prompt', 'sans-serif'] },
+                    colors: {
+                        brand: { light: '#f3e8ff', DEFAULT: '#9333ea', dark: '#581c87' },
+                        loss: { DEFAULT: '#f43f5e', light: '#ffe4e6' }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Chart.js (CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- SheetJS (CDN) สำหรับอ่านไฟล์ Excel อัตโนมัติ -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    
+    <style>
+        body { background-color: #f8fafc; }
+        .card { 
+            background: #ffffff; border-radius: 0.75rem; 
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); 
+            padding: 1.5rem;
+        }
+
+        /* ---------------------------------------------------
+           ตั้งค่า CSS แบบฟอร์มสำหรับแสดงบนหน้าเว็บปกติ
+           --------------------------------------------------- */
+        #pdf-content {
+            font-family: "Angsana New", "AngsanaUPC", serif;
+            color: #000; 
+            background: #fff;
+            width: 100%;
+            max-width: 800px; 
+            margin: 0 auto;
+            padding: 15px; 
+            box-sizing: border-box;
+            line-height: 1.15; /* บีบระยะบรรทัดขึ้นนิดหน่อย */
+        }
+        
+        #pdf-content, #pdf-content p, #pdf-content td, #pdf-content th, 
+        #pdf-content span, #pdf-content label, #pdf-content input, #pdf-content textarea {
+            font-size: 15pt; /* ปรับลดลงเพื่อให้จุใน 1 หน้าพอดี */
+        }
+
+        #pdf-content h2, #pdf-content h3, #pdf-content h4, #pdf-content .heading-text {
+            font-size: 16pt;
+            font-weight: bold;
+            margin-bottom: 2px;
+            margin-top: 6px;
+        }
+
+        .form-input {
+            border: none;
+            border-bottom: 1px dotted #000;
+            background: transparent;
+            width: 100%;
+            outline: none;
+            padding: 0 4px;
+            font-family: inherit;
+        }
+
+        #pdf-content .gov-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 5px; /* ลดช่องไฟใต้ตาราง */
+        }
+        #pdf-content .gov-table th, 
+        #pdf-content .gov-table td {
+            border: 1px solid #000;
+            padding: 2px 6px; /* ลด padding แนวนอนและตั้ง */
+            vertical-align: middle;
+        }
+        #pdf-content .gov-table th {
+            text-align: center;
+            font-weight: bold;
+        }
+        #pdf-content .note-text {
+            font-size: 13pt;
+        }
+
+        /* ---------------------------------------------------
+           ตั้งค่าสำหรับการ Export เป็น PDF ด้วย Native Browser Print
+           --------------------------------------------------- */
+        @page {
+            size: A4 portrait;
+            margin: 15mm; /* ลดระยะขอบจาก 20mm เป็น 15mm เพื่อเพิ่มพื้นที่ปลอดภัยด้านล่าง */
+        }
+
+        @media print {
+            /* ซ่อนทุกอย่างบนหน้าเว็บ ยกเว้นส่วนที่จะให้ Print */
+            body * {
+                visibility: hidden;
+            }
+            
+            /* แสดงเฉพาะเนื้อหาใน #pdf-content */
+            #pdf-content, #pdf-content * {
+                visibility: visible;
+            }
+            
+            /* จัดตำแหน่งให้พอดีกระดาษที่สุด */
+            #pdf-content {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                margin: 0;
+                padding: 0 !important; /* ระยะขอบถูกจัดการโดย @page แล้ว */
+                box-shadow: none !important;
+                page-break-after: avoid;
+            }
+            
+            /* ล้างระยะขอบและเงาของการ์ดรอบนอก ให้แนบสนิทกับกระดาษ */
+            #print-container, #pdf-wrapper {
+                box-shadow: none !important;
+                border: none !important;
+                border-radius: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background-color: transparent !important;
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+
+            /* ให้ตารางพิมพ์เส้นขอบออกมาคมชัด */
+            .gov-table th, .gov-table td {
+                border: 1pt solid #000 !important;
+            }
+
+            nav, footer, .hide-on-print {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased">
+
+    <!-- Header -->
+    <nav class="bg-brand-dark text-white shadow-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-3">
+                    <i class="fa-solid fa-bolt text-2xl text-yellow-400"></i>
+                    <span class="font-bold text-xl tracking-wide">POWER DISTRIBUTION DASHBOARD</span>
+                </div>
+                <div class="hidden md:block text-sm text-brand-light">
+                    ระบบวิเคราะห์ข้อมูลหน่วยจำหน่ายกระแสไฟฟ้า (ล้านหน่วย)
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        
+        <!-- Filters & Excel Upload -->
+        <div class="card border-l-4 border-brand flex flex-col lg:flex-row items-center justify-between gap-4 font-sans hide-on-print">
+            <div class="flex items-center space-x-2 text-brand-dark min-w-max">
+                <i class="fa-solid fa-filter"></i>
+                <h2 class="font-semibold text-lg">ตัวกรองและนำเข้าข้อมูล</h2>
+            </div>
+            
+            <div class="flex flex-wrap gap-3 w-full justify-end items-center">
+                <div class="flex items-center space-x-2 bg-slate-50 p-1.5 rounded-lg border border-slate-300">
+                    <i class="fa-solid fa-file-excel text-emerald-600 ml-2"></i>
+                    <input type="file" id="excelFileInput" accept=".xlsx, .xls" class="text-sm text-slate-700 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-emerald-100 file:text-emerald-700 hover:file:bg-emerald-200 outline-none cursor-pointer w-48 lg:w-auto" title="อัปโหลดไฟล์ วิเคราะห์หน่วยจำหน่าย ของคุณที่นี่">
+                </div>
+
+                <div class="h-6 w-px bg-slate-300 hidden lg:block"></div>
+
+                <select id="filterYear" class="bg-white border border-slate-300 text-sm rounded-lg focus:ring-brand focus:border-brand p-2 outline-none">
+                    <option value="all">ทุกปี (ภาพรวม)</option>
+                    <option value="2026" selected>ปี 2026</option>
+                    <option value="2025">ปี 2025</option>
+                    <option value="2024">ปี 2024</option>
+                </select>
+
+                <select id="filterMonth" class="bg-white border border-slate-300 text-sm rounded-lg focus:ring-brand focus:border-brand p-2 outline-none">
+                    <option value="all">ทุกเดือน</option>
+                    <option value="1">มกราคม</option>
+                    <option value="2">กุมภาพันธ์</option>
+                    <option value="3">มีนาคม</option>
+                    <option value="4">เมษายน</option>
+                    <option value="5">พฤษภาคม</option>
+                    <option value="6">มิถุนายน</option>
+                    <option value="7">กรกฎาคม</option>
+                    <option value="8">สิงหาคม</option>
+                    <option value="9">กันยายน</option>
+                    <option value="10">ตุลาคม</option>
+                    <option value="11">พฤศจิกายน</option>
+                    <option value="12">ธันวาคม</option>
+                </select>
+
+                <select id="filterRevenueGroup" class="bg-white border border-slate-300 text-sm rounded-lg focus:ring-brand focus:border-brand p-2 outline-none">
+                    <option value="all">ทุกกลุ่ม (คิดเงิน + สูญเสีย)</option>
+                    <option value="billed">เฉพาะ ไฟคิดเงิน</option>
+                    <option value="unbilled">เฉพาะ ไฟสูญเสีย/ไฟฟรี</option>
+                </select>
+
+                <select id="filterCategory" class="bg-white border border-slate-300 text-sm rounded-lg focus:ring-brand focus:border-brand p-2 outline-none">
+                    <option value="all">ทุกประเภทผู้ใช้ไฟ</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 font-sans hide-on-print">
+            <div class="card relative overflow-hidden group">
+                <p class="text-sm text-slate-500 font-medium mb-1">หน่วยจ่ายไฟฟ้ารวม</p>
+                <h3 class="text-3xl font-bold text-slate-800" id="kpiTotal">0.00</h3>
+                <p class="text-xs text-slate-400 mt-2">ล้านหน่วย</p>
+                <div class="absolute right-[-10px] top-[-10px] opacity-10 text-brand text-7xl"><i class="fa-solid fa-bolt"></i></div>
+            </div>
+
+            <div class="card relative overflow-hidden">
+                <p class="text-sm text-slate-500 font-medium mb-1">เติบโตเทียบปีก่อนหน้า</p>
+                <h3 class="text-3xl font-bold" id="kpiGrowth">0.00%</h3>
+                <p class="text-xs mt-2" id="kpiGrowthLabel">เปรียบเทียบปีปัจจุบัน</p>
+                <div class="absolute right-[-10px] top-[-10px] opacity-10 text-emerald-500 text-7xl"><i class="fa-solid fa-chart-line"></i></div>
+            </div>
+
+            <div class="card border-b-4 border-brand">
+                <p class="text-sm text-slate-500 font-medium mb-1">หน่วยคิดเงินได้ (Revenue)</p>
+                <h3 class="text-3xl font-bold text-brand" id="kpiBilled">0.00</h3>
+                <p class="text-xs text-slate-400 mt-2">ล้านหน่วย</p>
+            </div>
+
+            <div class="card border-b-4 border-loss bg-gradient-to-br from-white to-loss-light/30">
+                <p class="text-sm text-slate-600 font-medium mb-1">อัตราความสูญเสีย (% Loss)</p>
+                <h3 class="text-3xl font-bold text-loss" id="kpiLossPercent">0.00%</h3>
+                <p class="text-xs text-slate-500 mt-2">ปริมาณ: <span id="kpiLossUnits" class="font-semibold">0.00</span> ล้านหน่วย</p>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 font-sans hide-on-print">
+            <div class="card lg:col-span-2">
+                <h3 class="text-lg font-semibold border-l-4 border-brand pl-2 mb-4">แนวโน้มหน่วยจำหน่ายรายเดือนเปรียบเทียบทุกปี</h3>
+                <div class="relative h-80 w-full"><canvas id="chartLineYears"></canvas></div>
+            </div>
+            <div class="card lg:col-span-2">
+                <h3 class="text-lg font-semibold border-l-4 border-brand-dark pl-2 mb-4">สัดส่วนหน่วยคิดเงิน เทียบหน่วยสูญเสีย และแนวโน้ม % Loss รายเดือน</h3>
+                <div class="relative h-80 w-full"><canvas id="chartCombo"></canvas></div>
+            </div>
+            <div class="card">
+                <h3 class="text-lg font-semibold border-l-4 border-brand pl-2 mb-4">สัดส่วนหน่วยจำหน่ายแยกตามประเภทผู้ใช้ไฟ</h3>
+                <div class="relative h-72 w-full"><canvas id="chartBarCategory"></canvas></div>
+            </div>
+            <div class="card">
+                <h3 class="text-lg font-semibold border-l-4 border-brand pl-2 mb-4">โครงสร้างผู้ใช้ไฟหลัก (Top 5)</h3>
+                <div class="relative h-72 w-full flex justify-center"><canvas id="chartDoughnut"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Section: แบบสอบถามคลังจังหวัด (PDF Export) -->
+        <div id="print-container" class="card border-t-4 border-emerald-500 mt-8 font-sans">
+            
+            <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 hide-on-print">
+                <div>
+                    <h3 class="text-xl font-bold text-slate-800"><i class="fa-solid fa-file-contract text-emerald-500 mr-2"></i>สร้างแบบสอบถาม ภาวะเศรษฐกิจจังหวัดน่าน (คลังจังหวัด)</h3>
+                    <p class="text-sm text-slate-500 mt-1">ใช้ Native Print (ระยะขอบ 15mm, ปรับช่องไฟให้จบใน 1 หน้ากระดาษพอดี 100%)</p>
+                </div>
+                <button id="btnExportPDF" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition flex items-center">
+                    <i class="fa-solid fa-print mr-2"></i> พิมพ์ / Save PDF (A4)
+                </button>
+            </div>
+
+            <!-- Wrapper -->
+            <div id="pdf-wrapper" class="overflow-x-auto bg-slate-100 p-4 rounded-xl flex justify-center shadow-inner">
+                
+                <div id="pdf-content" class="bg-white text-black shadow-lg">
+                    
+                    <div style="text-align: center; margin-bottom: 6px;">
+                        <h2 class="heading-text">แบบสอบถาม</h2>
+                        <h2 class="heading-text">ความคิดเห็นเกี่ยวกับภาวะเศรษฐกิจจังหวัดน่าน ปี พ.ศ. 2569</h2>
+                    </div>
+                    
+                    <!-- ลด Margin ตรงคำชี้แจงเพื่อประหยัดที่ -->
+                    <div style="text-align: left; margin-bottom: 8px; text-justify: inter-word; text-align: justify;">
+                        <span style="font-weight: bold;">คำชี้แจง:</span> แบบสอบถามนี้จัดทำขึ้นเพื่อใช้ประกอบการประมาณการเศรษฐกิจของจังหวัด มิได้ใช้เป็นข้อมูลเพื่อการเผยแพร่หรือนำไปอ้างอิงเพื่อการอื่นใด การจัดทำประมาณการฯ อยู่ในขั้นตอนกรณีศึกษา โดยใช้วิธีการจัดทำประมาณการเศรษฐกิจของจังหวัด (Provincial Economic Management Chart) ซึ่งเป็นเครื่องมือช่วยในการวิเคราะห์และคาดการณ์แนวโน้มเศรษฐกิจของจังหวัดในระยะหนึ่ง
+                    </div>
+                    
+                    <!-- ส่วนที่ 1 -->
+                    <h4 class="font-bold border-b-2 border-black mb-1 pb-1 heading-text">ส่วนที่ 1 ข้อมูลทั่วไปเกี่ยวกับผู้ตอบแบบสอบถาม</h4>
+                    <table style="width: 100%; border: none; margin-bottom: 6px; border-spacing: 0 2px; border-collapse: separate;">
+                        <tr>
+                            <td style="width: 10%; white-space: nowrap;">ชื่อ</td>
+                            <td style="width: 40%; padding-right: 15px;"><input type="text" class="form-input" placeholder="......................................................"></td>
+                            <td style="width: 10%; white-space: nowrap;">ตำแหน่ง</td>
+                            <td style="width: 40%;"><input type="text" class="form-input" placeholder="......................................................"></td>
+                        </tr>
+                        <tr>
+                            <td style="white-space: nowrap;">สังกัดหน่วยงาน</td>
+                            <td colspan="3"><input type="text" class="form-input" value="การไฟฟ้าส่วนภูมิภาคจังหวัดน่าน"></td>
+                        </tr>
+                        <tr>
+                            <td style="white-space: nowrap;">โทรศัพท์สำนักงาน</td>
+                            <td style="padding-right: 15px;"><input type="text" class="form-input" placeholder="......................................................"></td>
+                            <td style="white-space: nowrap;">โทรศัพท์มือถือ</td>
+                            <td><input type="text" class="form-input" placeholder="......................................................"></td>
+                        </tr>
+                        <tr>
+                            <td style="white-space: nowrap;">โทรสาร</td>
+                            <td colspan="3"><input type="text" class="form-input" placeholder="......................................................"></td>
+                        </tr>
+                    </table>
+
+                    <!-- ส่วนที่ 2 -->
+                    <h4 class="font-bold border-b-2 border-black mb-1 pb-1 heading-text">ส่วนที่ 2 สอบถามตัวเลขประมาณการดัชนีเศรษฐกิจ</h4>
+                    <table class="gov-table">
+                        <thead>
+                            <tr class="bg-slate-50">
+                                <th style="width: 8%;" rowspan="2">ลำดับที่</th>
+                                <th style="width: 40%;" rowspan="2">เครื่องชี้วัด</th>
+                                <th colspan="2">คาดการณ์อัตราการขยายตัว<br>ปี 2569</th>
+                                <th style="width: 25%;" rowspan="2">เหตุผล</th>
+                            </tr>
+                            <tr class="bg-slate-50">
+                                <th style="width: 13%;">ขั้นต่ำ (%)</th>
+                                <th style="width: 14%;">ขั้นสูง (%)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="text-align: center;">1</td>
+                                <td>ประมาณการเศรษฐกิจจังหวัดน่าน</td>
+                                <td><input type="text" style="width: 100%; border: none; text-align: center; outline: none; background: transparent; font-family: inherit;" placeholder="..."></td>
+                                <td><input type="text" style="width: 100%; border: none; text-align: center; outline: none; background: transparent; font-family: inherit;" placeholder="..."></td>
+                                <td><input type="text" style="width: 100%; border: none; outline: none; background: transparent; font-family: inherit;" placeholder="..."></td>
+                            </tr>
+                            <tr>
+                                <td style="text-align: center;">2</td>
+                                <td>ปริมาณการใช้ไฟฟ้าภาคอุตสาหกรรม<br><span class="note-text text-gray-600">(กิจการขนาดกลาง, ขนาดใหญ่, เฉพาะอย่าง)</span></td>
+                                <td><input type="text" id="form-ind-min" style="width: 100%; border: none; text-align: center; outline: none; font-weight: bold; background: transparent; font-family: inherit;" placeholder="คำนวณ..."></td>
+                                <td><input type="text" id="form-ind-max" style="width: 100%; border: none; text-align: center; outline: none; font-weight: bold; background: transparent; font-family: inherit;" placeholder="คำนวณ..."></td>
+                                <td><input type="text" style="width: 100%; border: none; outline: none; background: transparent; font-family: inherit;" value="แนวโน้มการขยายตัวของกลุ่มธุรกิจ"></td>
+                            </tr>
+                            <tr>
+                                <td style="text-align: center;">3</td>
+                                <td>ปริมาณการใช้ไฟฟ้าภาคบริการ<br><span class="note-text text-gray-600">(กิจการขนาดเล็ก)</span></td>
+                                <td><input type="text" id="form-srv-min" style="width: 100%; border: none; text-align: center; outline: none; font-weight: bold; background: transparent; font-family: inherit;" placeholder="คำนวณ..."></td>
+                                <td><input type="text" id="form-srv-max" style="width: 100%; border: none; text-align: center; outline: none; font-weight: bold; background: transparent; font-family: inherit;" placeholder="คำนวณ..."></td>
+                                <td><input type="text" style="width: 100%; border: none; outline: none; background: transparent; font-family: inherit;" value="กิจกรรมภาคบริการและการท่องเที่ยวฟื้นตัว"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <!-- ส่วนที่ 3 -->
+                    <h4 class="font-bold border-b-2 border-black mb-1 pb-1 heading-text">ส่วนที่ 3 ปัจจัยที่มีผลกระทบต่อการเปลี่ยนแปลง</h4>
+                    <table style="width: 100%; border: none; margin-bottom: 4px;">
+                        <tr>
+                            <td style="width: 50%; padding-bottom: 0px;">
+                                <label style="display: flex; align-items: center;"><input type="checkbox" style="margin-right: 8px; width: 14px; height: 14px;"> ราคาสินค้า</label>
+                            </td>
+                            <td style="width: 50%; padding-bottom: 0px;">
+                                <label style="display: flex; align-items: center;"><input type="checkbox" style="margin-right: 8px; width: 14px; height: 14px;"> ต้นทุนการผลิต เช่น ปุ๋ย ยาฆ่าแมลง น้ำมัน</label>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding-bottom: 0px;">
+                                <label style="display: flex; align-items: center;"><input type="checkbox" style="margin-right: 8px; width: 14px; height: 14px;"> สภาพอากาศ/ภัยธรรมชาติ</label>
+                            </td>
+                            <td style="padding-bottom: 0px;">
+                                <label style="display: flex; align-items: center;"><input type="checkbox" style="margin-right: 8px; width: 14px; height: 14px;"> การค้าชายแดน</label>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding-bottom: 0px;">
+                                <label style="display: flex; align-items: center;"><input type="checkbox" style="margin-right: 8px; width: 14px; height: 14px;"> โรคระบาด (พืช,สัตว์)</label>
+                            </td>
+                            <td style="padding-bottom: 0px;">
+                                <label style="display: flex; align-items: center;"><input type="checkbox" style="margin-right: 8px; width: 14px; height: 14px;"> สถานการณ์ทางการเมือง</label>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding-bottom: 0px;">
+                                <label style="display: flex; align-items: center;"><input type="checkbox" style="margin-right: 8px; width: 14px; height: 14px;"> นโยบายการส่งเสริมของรัฐบาล</label>
+                            </td>
+                            <td style="padding-bottom: 0px; display: flex; align-items: center;">
+                                <label style="display: flex; align-items: center; white-space: nowrap;"><input type="checkbox" style="margin-right: 8px; width: 14px; height: 14px;"> อื่นๆ</label>
+                                <input type="text" class="form-input" style="margin-left: 8px;" placeholder="โปรดระบุ...">
+                            </td>
+                        </tr>
+                    </table>
+
+                    <!-- ปรับกล่องข้อเสนอแนะให้เตี้ยลงเพื่อประหยัดพื้นที่ -->
+                    <div style="margin-bottom: 6px;">
+                        <label class="heading-text font-bold" style="display: block; margin-bottom: 2px;">ข้อเสนอแนะเพิ่มเติม:</label>
+                        <textarea style="width: 100%; border: 1px solid #94a3b8; padding: 4px; outline: none; height: 40px; border-radius: 4px; font-family: inherit; resize: none; background: transparent;"></textarea>
+                    </div>
+
+                    <!-- Footer Note -->
+                    <div style="border-top: 1px solid #000; padding-top: 4px;">
+                        <p class="note-text text-gray-600" style="margin-bottom: 0;">คำอธิบาย: สำนักงานคลังจังหวัดน่าน โทร. 0-5471-6459 ต่อ 316 โทรสาร 0-5471-6459 ต่อ 324-325 มือถือ 093-134-9157</p>
+                        <p class="note-text text-gray-600" style="margin-bottom: 0;">หมายเหตุ: หากมีข้อสงสัยประการใดสามารถสอบถามได้ที่นายอนุพงค์ บุญเจือ นักวิชาการคลังชำนาญการ</p>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="text-center py-6 text-sm text-slate-400 border-t mt-6 font-sans hide-on-print">
+        &copy; 2026 Power Distribution Analytics System | สถานะข้อมูล: <span id="dataSourceBadge" class="text-amber-500 font-semibold"><i class="fa-solid fa-database"></i> Mock Data (กรุณาอัปโหลดไฟล์ Excel)</span>
+    </footer>
+
+    <!-- JavaScript Logic -->
+    <script>
+        const billedCategories = ['บ้านอยู่อาศัยขนาดเล็ก', 'บ้านอยู่อาศัยขนาดใหญ่', 'กิจการขนาดเล็ก', 'กิจการขนาดกลาง', 'กิจการขนาดใหญ่', 'กิจการเฉพาะอย่าง', 'องค์กรที่ไม่แสวงหากำไร', 'สูบน้ำเพื่อการเกษตร', 'ไฟชั่วคราว', 'ไฟสำรอง', 'EV'];
+        const unbilledCategories = ['ไฟสาธารณะ', 'ไฟทางหลวง', 'ไฟอาคาร', 'PEA Volta', 'Wallcharge', 'ไฟลานกีฬา', 'ทหารผ่านศึก', 'อื่นๆ'];
+        const monthNamesTh = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+        const monthNamesFull = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+
+        let rawData = generateMockData();
+
+        document.getElementById('excelFileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const excelJsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                    
+                    let headerRowIndex = -1;
+                    for (let r = 0; r < 5; r++) {
+                        if (excelJsonData[r] && excelJsonData[r].includes('ประเภท')) { headerRowIndex = r; break; }
+                    }
+
+                    if (headerRowIndex === -1) {
+                        alert("ไม่พบโครงสร้างตาราง (ไม่พบคำว่า 'ประเภท') กรุณาตรวจสอบไฟล์");
+                        return;
+                    }
+
+                    const headerRow = excelJsonData[headerRowIndex];
+                    let blocks = [];
+                    for (let c = 0; c < headerRow.length; c++) {
+                        if (String(headerRow[c]).trim() === 'ประเภท') {
+                            let blockMap = {};
+                            for(let c2 = c + 1; c2 < headerRow.length; c2++) {
+                                if (!headerRow[c2] || String(headerRow[c2]).trim() === 'ประเภท') break;
+                                blockMap[c2] = String(headerRow[c2]).trim();
+                            }
+                            blocks.push({ startCol: c, map: blockMap });
+                        }
+                    }
+
+                    let newRawData = [];
+                    for (let r = headerRowIndex + 1; r < excelJsonData.length; r++) {
+                        let row = excelJsonData[r];
+                        if (!row || row.length === 0) continue;
+                        
+                        for (let b = 0; b < blocks.length; b++) {
+                            let block = blocks[b];
+                            let dateCell = row[block.startCol];
+                            if (!dateCell) continue;
+                            
+                            let parsedDate = parseMonthYearString(dateCell);
+                            if (!parsedDate) continue;
+                            
+                            let entry = newRawData.find(d => d.year === parsedDate.year && d.month === parsedDate.month);
+                            if (!entry) {
+                                entry = { year: parsedDate.year, month: parsedDate.month, billed: {}, unbilled: {} };
+                                newRawData.push(entry);
+                            }
+                            
+                            for (let c in block.map) {
+                                let catName = block.map[c];
+                                let val = parseFloat(row[c]) || 0;
+                                let valMillion = val / 1000000; 
+                                
+                                if (billedCategories.includes(catName)) { entry.billed[catName] = valMillion; } 
+                                else if (unbilledCategories.includes(catName)) { entry.unbilled[catName] = valMillion; }
+                            }
+                        }
+                    }
+
+                    if (newRawData.length > 0) {
+                        rawData = newRawData; 
+                        let availableYears = [...new Set(newRawData.map(d => d.year))].sort((a,b) => b - a);
+                        let yearDropdown = document.getElementById('filterYear');
+                        yearDropdown.innerHTML = '<option value="all">ทุกปี (ภาพรวม)</option>';
+                        availableYears.forEach(yr => {
+                            yearDropdown.innerHTML += `<option value="${yr}" ${yr === availableYears[0] ? 'selected' : ''}>ปี ${yr}</option>`;
+                        });
+
+                        document.getElementById('dataSourceBadge').innerHTML = '<span class="text-emerald-500 font-semibold"><i class="fa-solid fa-check-circle"></i> ใช้ข้อมูลจากไฟล์ Excel สำเร็จ</span>';
+                        alert(`อัปโหลดและคำนวณข้อมูลสำเร็จ!`);
+                        
+                        updateDashboard();
+                        calculateFormEstimates();
+                    }
+
+                } catch(error) { console.error(error); alert("เกิดข้อผิดพลาดในการอ่านไฟล์"); }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        function parseMonthYearString(val) {
+            if (!val) return null;
+            let str = String(val).trim();
+            if (str.includes('-')) return null; 
+            
+            let m = -1, y = -1;
+            if (val instanceof Date) {
+                m = val.getMonth() + 1;
+                let fullY = val.getFullYear();
+                if (fullY >= 1900 && fullY <= 2000) y = 2500 + (fullY % 100) - 543;
+                else if (fullY >= 2500) y = fullY - 543;
+                else y = fullY;
+            } else {
+                for(let i=0; i<12; i++) {
+                    if(str.indexOf(monthNamesTh[i]) !== -1 || str.indexOf(monthNamesFull[i]) !== -1) { m = i + 1; break; }
+                }
+                let yMatch = str.match(/\d{2,4}/);
+                if(yMatch) {
+                    let yInt = parseInt(yMatch[0]);
+                    if(yInt >= 60 && yInt <= 99) y = 2500 + yInt - 543; 
+                    else if(yInt >= 2560) y = yInt - 543;               
+                    else if(yInt >= 2000) y = yInt;                     
+                }
+            }
+            if (m !== -1 && y !== -1) return { month: m, year: y };
+            return null;
+        }
+
+        let charts = { line: null, bar: null, combo: null, doughnut: null };
+        Chart.defaults.font.family = "'Prompt', sans-serif";
+
+        function populateCategoryDropdown() {
+            const groupFilter = document.getElementById('filterRevenueGroup').value;
+            const catSelect = document.getElementById('filterCategory');
+            catSelect.innerHTML = '<option value="all">ทุกประเภทผู้ใช้ไฟ</option>';
+            let listToUse = (groupFilter === 'billed') ? billedCategories : ((groupFilter === 'unbilled') ? unbilledCategories : [...billedCategories, ...unbilledCategories]);
+            listToUse.forEach(cat => { catSelect.innerHTML += `<option value="${cat}">${cat}</option>`; });
+        }
+
+        function updateDashboard() {
+            const selYear = document.getElementById('filterYear').value;
+            const selMonth = document.getElementById('filterMonth').value;
+            const selGroup = document.getElementById('filterRevenueGroup').value;
+            const selCategory = document.getElementById('filterCategory').value;
+
+            let currentData = rawData.filter(d => {
+                return (selYear === 'all' || d.year == selYear) && (selMonth === 'all' || d.month == selMonth);
+            });
+
+            let sumBilled = 0, sumUnbilled = 0;
+            currentData.forEach(d => {
+                if (selGroup === 'all' || selGroup === 'billed') sumBilled += (selCategory === 'all') ? Object.values(d.billed).reduce((a, b) => a + b, 0) : (d.billed[selCategory] || 0);
+                if (selGroup === 'all' || selGroup === 'unbilled') sumUnbilled += (selCategory === 'all') ? Object.values(d.unbilled).reduce((a, b) => a + b, 0) : (d.unbilled[selCategory] || 0);
+            });
+
+            let sumTotal = sumBilled + sumUnbilled;
+            let lossPercent = sumTotal > 0 ? (sumUnbilled / sumTotal) * 100 : 0;
+
+            document.getElementById('kpiTotal').innerText = sumTotal.toLocaleString('th-TH', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            document.getElementById('kpiBilled').innerText = sumBilled.toLocaleString('th-TH', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            document.getElementById('kpiLossUnits').innerText = sumUnbilled.toLocaleString('th-TH', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            document.getElementById('kpiLossPercent').innerText = lossPercent.toFixed(2) + '%';
+
+            let growthEl = document.getElementById('kpiGrowth');
+            let growthLabelEl = document.getElementById('kpiGrowthLabel');
+            if (selYear !== 'all') {
+                let prevData = rawData.filter(d => (d.year == selYear - 1) && (selMonth === 'all' || d.month == selMonth));
+                let prevSum = 0;
+                prevData.forEach(d => {
+                    let b = (selCategory === 'all') ? Object.values(d.billed).reduce((a, b) => a + b, 0) : (d.billed[selCategory] || 0);
+                    let ub = (selCategory === 'all') ? Object.values(d.unbilled).reduce((a, b) => a + b, 0) : (d.unbilled[selCategory] || 0);
+                    prevSum += (selGroup === 'billed') ? b : ((selGroup === 'unbilled') ? ub : (b + ub));
+                });
+                let growth = prevSum > 0 ? ((sumTotal - prevSum) / prevSum) * 100 : 0;
+                growthEl.innerText = (prevSum > 0 ? (growth > 0 ? '+' : '') + growth.toFixed(2) + '%' : 'N/A');
+                growthEl.className = "text-3xl font-bold " + (growth >= 0 ? "text-emerald-500" : "text-red-500");
+                growthLabelEl.innerText = `เทียบช่วงเดียวกันปี ${selYear - 1}`;
+            } else {
+                growthEl.innerText = "-";
+                growthEl.className = "text-3xl font-bold text-slate-400";
+                growthLabelEl.innerText = "ไม่สามารถคำนวณเปรียบเทียบได้";
+            }
+
+            drawChartLineYears(selGroup, selCategory); 
+            drawChartBar(currentData, selGroup);
+            drawChartCombo(currentData);
+            drawChartDoughnut(currentData, selGroup);
+        }
+
+        function drawChartLineYears(sG, sC) { 
+            if (charts.line) charts.line.destroy();
+            let availableYears = [...new Set(rawData.map(d => d.year))].sort();
+            const colors = ['#cbd5e1', '#94a3b8', '#64748b', '#c084fc', '#9333ea', '#581c87'];
+            let datasets = availableYears.map((yr, idx) => {
+                let mData = monthNamesTh.map((_, mIdx) => {
+                    let d = rawData.find(x => x.year === yr && x.month === mIdx + 1);
+                    if(!d) return 0;
+                    let b = (sC === 'all') ? Object.values(d.billed).reduce((a, b)=>a+b,0) : (d.billed[sC]||0);
+                    let ub = (sC === 'all') ? Object.values(d.unbilled).reduce((a, b)=>a+b,0) : (d.unbilled[sC]||0);
+                    return (sG === 'billed') ? b : ((sG === 'unbilled') ? ub : b + ub);
+                });
+                return { label: `ปี ${yr}`, data: mData, borderColor: colors[idx % colors.length], backgroundColor: colors[idx % colors.length], borderWidth: yr === Math.max(...availableYears) ? 3 : 2, tension: 0.3 };
+            });
+            charts.line = new Chart(document.getElementById('chartLineYears'), { type: 'line', data: { labels: monthNamesTh, datasets: datasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { tooltip: { mode: 'index', intersect: false } }, scales: { y: { title: { display: true, text: 'ล้านหน่วย' } } } } });
+        }
+        function drawChartBar(data, sG) { 
+            if (charts.bar) charts.bar.destroy();
+            let labels = [], values = [];
+            if (sG === 'all' || sG === 'billed') billedCategories.forEach(cat => { labels.push(cat); values.push(data.reduce((acc, row) => acc + (row.billed[cat] || 0), 0)); });
+            if (sG === 'all' || sG === 'unbilled') unbilledCategories.forEach(cat => { labels.push(cat + ' (Loss)'); values.push(data.reduce((acc, row) => acc + (row.unbilled[cat] || 0), 0)); });
+            charts.bar = new Chart(document.getElementById('chartBarCategory'), { type: 'bar', data: { labels: labels, datasets: [{ label: 'ล้านหน่วย', data: values, backgroundColor: '#a855f7', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { maxRotation: 45, minRotation: 45 } } } } });
+        }
+        function drawChartCombo(data) { 
+            if (charts.combo) charts.combo.destroy();
+            let monthlyAgg = monthNamesTh.map((_, i) => {
+                let monthData = data.filter(d => d.month === i + 1);
+                let b = 0, ub = 0;
+                monthData.forEach(d => { b += Object.values(d.billed).reduce((a,b)=>a+b,0); ub += Object.values(d.unbilled).reduce((a,b)=>a+b,0); });
+                return { billed: b, unbilled: ub, pLoss: (b+ub > 0) ? (ub/(b+ub))*100 : 0 };
+            });
+            charts.combo = new Chart(document.getElementById('chartCombo'), { type: 'bar', data: { labels: monthNamesTh, datasets: [{ type: 'line', label: '% Loss', data: monthlyAgg.map(x => x.pLoss), borderColor: '#f43f5e', backgroundColor: '#f43f5e', borderWidth: 2, yAxisID: 'yLoss', tension: 0.3, marker: 'circle' }, { type: 'bar', label: 'Billed', data: monthlyAgg.map(x => x.billed), backgroundColor: '#9333ea', yAxisID: 'yUnit' }, { type: 'bar', label: 'Loss', data: monthlyAgg.map(x => x.unbilled), backgroundColor: '#cbd5e1', yAxisID: 'yUnit' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, yUnit: { stacked: true, position: 'left' }, yLoss: { position: 'right', min: 0, grid: { drawOnChartArea: false } } } } });
+        }
+        function drawChartDoughnut(data, sG) { 
+            if (charts.doughnut) charts.doughnut.destroy();
+            let breakdown = [];
+            if (sG === 'all' || sG === 'billed') billedCategories.forEach(cat => breakdown.push({ name: cat, val: data.reduce((acc, row) => acc + (row.billed[cat] || 0), 0) }));
+            if (sG === 'all' || sG === 'unbilled') unbilledCategories.forEach(cat => breakdown.push({ name: cat + '(Loss)', val: data.reduce((acc, row) => acc + (row.unbilled[cat] || 0), 0) }));
+            breakdown.sort((a, b) => b.val - a.val);
+            let top5 = breakdown.slice(0, 5);
+            let othersVal = breakdown.slice(5).reduce((acc, curr) => acc + curr.val, 0);
+            if (othersVal > 0) top5.push({ name: 'กลุ่มอื่นๆรวมกัน', val: othersVal });
+            charts.doughnut = new Chart(document.getElementById('chartDoughnut'), { type: 'doughnut', data: { labels: top5.map(x => x.name), datasets: [{ data: top5.map(x => x.val), backgroundColor: ['#581c87', '#9333ea', '#c084fc', '#eab308', '#2dd4bf', '#cbd5e1'], borderWidth: 2, borderColor: '#fff' }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '55%', plugins: { legend: { position: 'right' } } } });
+        }
+
+        ['filterYear', 'filterMonth', 'filterCategory'].forEach(id => document.getElementById(id).addEventListener('change', updateDashboard));
+        document.getElementById('filterRevenueGroup').addEventListener('change', function() { populateCategoryDropdown(); updateDashboard(); });
+
+        function generateMockData() {
+            let data = [];
+            for (let year = 2024; year <= 2026; year++) {
+                let baseMult = 1 + (year-2024)*0.05;
+                for (let month = 1; month <= 12; month++) {
+                    let row = { year: year, month: month, billed: {}, unbilled: {} };
+                    billedCategories.forEach(cat => { row.billed[cat] = (Math.random() * 5 + 1) * baseMult; });
+                    unbilledCategories.forEach(cat => { row.unbilled[cat] = Math.random() * 0.5 + 0.1; });
+                    data.push(row);
+                }
+            }
+            return data;
+        }
+
+        function calculateFormEstimates() {
+            if (!rawData || rawData.length === 0) return;
+            
+            let maxYear = Math.max(...rawData.map(d => d.year));
+            let prevYear = maxYear - 1;
+
+            let indPrev = 0, indMax = 0;
+            let srvPrev = 0, srvMax = 0;
+
+            rawData.forEach(d => {
+                let indSum = (d.billed['กิจการขนาดกลาง'] || 0) + (d.billed['กิจการขนาดใหญ่'] || 0) + (d.billed['กิจการเฉพาะอย่าง'] || 0);
+                let srvSum = (d.billed['กิจการขนาดเล็ก'] || 0);
+
+                if (d.year === prevYear) { indPrev += indSum; srvPrev += srvSum; }
+                if (d.year === maxYear) { indMax += indSum; srvMax += srvSum; }
+            });
+
+            if (indPrev > 0) {
+                let growthInd = ((indMax - indPrev) / indPrev) * 100;
+                document.getElementById('form-ind-min').value = (growthInd - 0.5).toFixed(2);
+                document.getElementById('form-ind-max').value = (growthInd + 0.5).toFixed(2);
+            }
+
+            if (srvPrev > 0) {
+                let growthSrv = ((srvMax - srvPrev) / srvPrev) * 100;
+                document.getElementById('form-srv-min').value = (growthSrv - 0.5).toFixed(2);
+                document.getElementById('form-srv-max').value = (growthSrv + 0.5).toFixed(2);
+            }
+        }
+
+        // ---------------------------------------------------------
+        // 3. ระบบพิมพ์ (Native Print) เพื่อแปลงเป็น PDF
+        // ---------------------------------------------------------
+        document.getElementById('btnExportPDF').addEventListener('click', function() {
+            // โอนค่าใน Input เพื่อให้แสดงตอนพิมพ์
+            const element = document.getElementById('pdf-content');
+            const inputs = element.querySelectorAll('input, textarea');
+            inputs.forEach(input => {
+                if (input.type === 'checkbox' || input.type === 'radio') {
+                    if (input.checked) input.setAttribute('checked', 'checked');
+                    else input.removeAttribute('checked');
+                } else if (input.tagName === 'TEXTAREA') {
+                    input.innerHTML = input.value; 
+                } else {
+                    input.setAttribute('value', input.value); 
+                }
+            });
+
+            // สั่งพิมพ์ผ่านเบราว์เซอร์
+            window.print();
+        });
+
+        // สั่งทำงานครั้งแรก
+        populateCategoryDropdown();
+        updateDashboard();
+        calculateFormEstimates();
+
+    </script>
+</body>
+</html>
